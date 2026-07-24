@@ -1348,7 +1348,11 @@ function ensurePdfLibs(){
 }
 
 function downloadPdfBlob(doc, filename){
-  const blob = doc.output('blob');
+  const pdfBlob = doc.output('blob');
+  // Re-wrap as a generic binary type so Safari (which has a built-in PDF
+  // viewer) doesn't render it inline and instead triggers a real download,
+  // matching the CSV behavior.
+  const blob = new Blob([pdfBlob], {type: 'application/octet-stream'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
