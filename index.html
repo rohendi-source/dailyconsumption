@@ -701,17 +701,24 @@ async function saveThresholds(){
 
 async function loadEntriesForDate(date){
   state.drafts = {};
-  try{
-    const res = await withTimeout(window.storage.get(entryKey(date), true), 4000);
-    state.entries = res ? JSON.parse(res.value) : {};
-  }catch(e){
+  const prevDate = getPreviousDate(date);
+
+  const [todayResult, prevResult] = await Promise.allSettled([
+    withTimeout(window.storage.get(entryKey(date), true), 4000),
+    withTimeout(window.storage.get(entryKey(prevDate), true), 4000),
+  ]);
+
+  if(todayResult.status === 'fulfilled' && todayResult.value){
+    try{ state.entries = JSON.parse(todayResult.value.value); }
+    catch(e){ state.entries = {}; }
+  }else{
     state.entries = {};
   }
-  try{
-    const prevDate = getPreviousDate(date);
-    const prevRes = await withTimeout(window.storage.get(entryKey(prevDate), true), 4000);
-    state.previousEntries = prevRes ? JSON.parse(prevRes.value) : {};
-  }catch(e){
+
+  if(prevResult.status === 'fulfilled' && prevResult.value){
+    try{ state.previousEntries = JSON.parse(prevResult.value.value); }
+    catch(e){ state.previousEntries = {}; }
+  }else{
     state.previousEntries = {};
   }
 }
@@ -1736,9 +1743,11 @@ async function init(){
   document.getElementById('view-input').innerHTML = '<div class="empty-state">Loading data...</div>';
 
   try{
-    await loadConfig();
-    await withTimeout(loadThresholds(), 5000);
-    await withTimeout(loadEntriesForDate(state.date), 5000);
+    await Promise.all([
+      loadConfig(),
+      withTimeout(loadThresholds(), 5000),
+      withTimeout(loadEntriesForDate(state.date), 5000),
+    ]);
   }catch(e){
     console.error('Init load failed', e);
   }
