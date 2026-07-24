@@ -1347,6 +1347,18 @@ function ensurePdfLibs(){
   return pdfLibsPromise;
 }
 
+function downloadPdfBlob(doc, filename){
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+}
+
 function getReloadLogoDataUrl(){
   const img = document.querySelector('.brand-logo img');
   return img ? img.src : null;
@@ -1446,7 +1458,7 @@ async function exportDailyPDF(){
     });
 
     addPdfFooter(doc);
-    doc.save(`daily-consumption-${state.date}.pdf`);
+    downloadPdfBlob(doc, `daily-consumption-${state.date}.pdf`);
     showToast('PDF report downloaded');
   }catch(err){
     console.error('PDF generation failed', err);
@@ -1549,7 +1561,7 @@ async function exportWeeklyPDF(){
     });
 
     addPdfFooter(doc);
-    doc.save(`weekly-consumption-${dates[0]}.pdf`);
+    downloadPdfBlob(doc, `weekly-consumption-${dates[0]}.pdf`);
     showToast('PDF report downloaded');
   }catch(err){
     console.error('Weekly PDF generation failed', err);
