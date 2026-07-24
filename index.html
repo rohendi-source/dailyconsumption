@@ -1349,18 +1349,18 @@ function ensurePdfLibs(){
 
 function downloadPdfBlob(doc, filename){
   const pdfBlob = doc.output('blob');
-  // Re-wrap as a generic binary type so Safari (which has a built-in PDF
-  // viewer) doesn't render it inline and instead triggers a real download,
-  // matching the CSV behavior.
-  const blob = new Blob([pdfBlob], {type: 'application/octet-stream'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  const reader = new FileReader();
+  reader.onload = function(){
+    const a = document.createElement('a');
+    // Force a generic binary data URI so Safari's content sniffer doesn't
+    // recognize the %PDF signature and hand it to the inline viewer.
+    a.href = reader.result.replace('data:application/pdf', 'data:application/octet-stream');
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  reader.readAsDataURL(pdfBlob);
 }
 
 function getReloadLogoDataUrl(){
@@ -1618,11 +1618,32 @@ function attemptUnlock(){
   }
 }
 
+function getStaffName(){
+  return (document.getElementById('staffName').value || '').trim();
+}
+
+function requireStaffName(){
+  const nameInput = document.getElementById('staffName');
+  const name = getStaffName();
+  if(!name){
+    showToast('Please enter your name before submitting');
+    nameInput.focus();
+    nameInput.style.borderColor = 'var(--danger)';
+    return false;
+  }
+  nameInput.style.borderColor = '';
+  return true;
+}
+
 function bindStaticListeners(){
   document.getElementById('datePicker').addEventListener('change', async (e)=>{
     const newDate = e.target.value;
     const previousDate = state.date;
     if(Object.keys(state.drafts).length > 0){
+      if(!requireStaffName()){
+        e.target.value = previousDate;
+        return;
+      }
       const ok = await submitAllDrafts();
       if(!ok){
         showToast('Unsubmitted changes — fix connection and try again');
@@ -1640,9 +1661,11 @@ function bindStaticListeners(){
 
   document.getElementById('staffName').addEventListener('change', (e)=>{
     state.staffName = e.target.value;
+    if(e.target.value.trim()) e.target.style.borderColor = '';
   });
 
   document.getElementById('submitBtn').addEventListener('click', async ()=>{
+    if(!requireStaffName()) return;
     await submitAllDrafts();
     renderInputView();
   });
