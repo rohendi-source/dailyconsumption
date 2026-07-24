@@ -1396,59 +1396,65 @@ async function exportDailyPDF(){
     btn.disabled = false;
     return;
   }
-  btn.textContent = originalText;
-  btn.disabled = false;
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({unit:'mm', format:'a4'});
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({unit:'mm', format:'a4'});
 
-  const dateLabel = new Date(state.date+'T00:00:00').toLocaleDateString('en-GB', {weekday:'long', day:'2-digit', month:'long', year:'numeric'});
-  addPdfHeader(doc, 'Daily Consumption Report', `${dateLabel}  ·  Support Equipment Inventory`);
+    const dateLabel = new Date(state.date+'T00:00:00').toLocaleDateString('en-GB', {weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+    addPdfHeader(doc, 'Daily Consumption Report', `${dateLabel}  ·  Support Equipment Inventory`);
 
-  let filled=0, low=0, ok=0;
-  const rows = state.items.map(item=>{
-    const entry = state.entries[item.id];
-    const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
-    const lowNow = hasEntry && isLow(item.id, entry.count);
-    if(hasEntry){ filled++; lowNow ? low++ : ok++; }
-    const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low Stock' : 'OK');
-    const prevCount = formatDelta(item.id);
-    const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
-    return [
-      item.name,
-      item.unit,
-      prevCount !== null ? String(prevCount) : '—',
-      hasEntry ? String(entry.count) : '—',
-      diff === '' ? '—' : (diff>0?`+${diff}`:String(diff)),
-      hasEntry ? (entry.staffName||'—') : '—',
-      status,
-    ];
-  });
+    let filled=0, low=0, ok=0;
+    const rows = state.items.map(item=>{
+      const entry = state.entries[item.id];
+      const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
+      const lowNow = hasEntry && isLow(item.id, entry.count);
+      if(hasEntry){ filled++; lowNow ? low++ : ok++; }
+      const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low Stock' : 'OK');
+      const prevCount = formatDelta(item.id);
+      const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
+      return [
+        item.name,
+        item.unit,
+        prevCount !== null ? String(prevCount) : '—',
+        hasEntry ? String(entry.count) : '—',
+        diff === '' ? '—' : (diff>0?`+${diff}`:String(diff)),
+        hasEntry ? (entry.staffName||'—') : '—',
+        status,
+      ];
+    });
 
-  doc.setFontSize(10);
-  doc.setTextColor(60,60,60);
-  doc.text(`Filled: ${filled}/${state.items.length}    Low Stock: ${low}    OK: ${ok}`, 14, 34);
+    doc.setFontSize(10);
+    doc.setTextColor(60,60,60);
+    doc.text(`Filled: ${filled}/${state.items.length}    Low Stock: ${low}    OK: ${ok}`, 14, 34);
 
-  doc.autoTable({
-    startY: 38,
-    head: [['Item','Unit','Yesterday','Today','Change','Staff','Status']],
-    body: rows,
-    styles:{ fontSize:8, cellPadding:2 },
-    headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
-    alternateRowStyles:{ fillColor:[245,245,242] },
-    didParseCell: (data)=>{
-      if(data.section==='body' && data.column.index===6){
-        const val = data.cell.raw;
-        if(val==='Low Stock'){ data.cell.styles.textColor=[163,51,82]; data.cell.styles.fontStyle='bold'; }
-        else if(val==='OK'){ data.cell.styles.textColor=[110,140,60]; data.cell.styles.fontStyle='bold'; }
-        else{ data.cell.styles.textColor=[150,150,150]; data.cell.styles.fontStyle='italic'; }
-      }
-    },
-  });
+    doc.autoTable({
+      startY: 38,
+      head: [['Item','Unit','Yesterday','Today','Change','Staff','Status']],
+      body: rows,
+      styles:{ fontSize:8, cellPadding:2 },
+      headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
+      alternateRowStyles:{ fillColor:[245,245,242] },
+      didParseCell: (data)=>{
+        if(data.section==='body' && data.column.index===6){
+          const val = data.cell.raw;
+          if(val==='Low Stock'){ data.cell.styles.textColor=[163,51,82]; data.cell.styles.fontStyle='bold'; }
+          else if(val==='OK'){ data.cell.styles.textColor=[110,140,60]; data.cell.styles.fontStyle='bold'; }
+          else{ data.cell.styles.textColor=[150,150,150]; data.cell.styles.fontStyle='italic'; }
+        }
+      },
+    });
 
-  addPdfFooter(doc);
-  doc.save(`daily-consumption-${state.date}.pdf`);
-  showToast('PDF report downloaded');
+    addPdfFooter(doc);
+    doc.save(`daily-consumption-${state.date}.pdf`);
+    showToast('PDF report downloaded');
+  }catch(err){
+    console.error('PDF generation failed', err);
+    showToast(`PDF error: ${err.message}`.slice(0,80));
+  }finally{
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
 async function exportWeeklyPDF(){
@@ -1467,85 +1473,91 @@ async function exportWeeklyPDF(){
     btn.disabled = false;
     return;
   }
-  btn.textContent = originalText;
-  btn.disabled = false;
 
-  const { dates, dataByDate, prevDayEntries } = data;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({unit:'mm', format:'a4', orientation:'landscape'});
+  try{
+    const { dates, dataByDate, prevDayEntries } = data;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({unit:'mm', format:'a4', orientation:'landscape'});
 
-  const weekLabel = `${formatShort(dates[0])} – ${formatShort(dates[dates.length-1])} ${new Date(dates[dates.length-1]+'T00:00:00').getFullYear()}`;
-  addPdfHeader(doc, 'Weekly Consumption Report', `${weekLabel}  ·  Support Equipment Inventory`);
+    const weekLabel = `${formatShort(dates[0])} – ${formatShort(dates[dates.length-1])} ${new Date(dates[dates.length-1]+'T00:00:00').getFullYear()}`;
+    addPdfHeader(doc, 'Weekly Consumption Report', `${weekLabel}  ·  Support Equipment Inventory`);
 
-  const staffRows = dates.map(dt=>{
-    const dayEntries = dataByDate[dt] || {};
-    const staffSet = new Set();
-    let filledCount = 0;
-    Object.values(dayEntries).forEach(e=>{
-      if(e && e.count !== '' && e.count !== undefined){
-        filledCount++;
-        if(e.staffName) staffSet.add(e.staffName);
-      }
-    });
-    return [formatDayLabel(dt), `${filledCount}/${state.items.length}`, staffSet.size?Array.from(staffSet).join(', '):'—'];
-  });
-
-  doc.setFontSize(11);
-  doc.setTextColor(30,30,30);
-  doc.text('Staff Log by Day', 14, 34);
-  doc.autoTable({
-    startY: 37,
-    head: [['Date','Filled','Staff Who Input']],
-    body: staffRows,
-    styles:{ fontSize:8, cellPadding:2 },
-    headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
-    alternateRowStyles:{ fillColor:[245,245,242] },
-    tableWidth: 120,
-  });
-
-  const trendHead = ['Item','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'];
-  const trendRows = state.items.map(item=>{
-    const openingEntry = prevDayEntries[item.id];
-    const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
-    const opening = hasOpening ? Number(openingEntry.count) : null;
-
-    const dayCells = dates.map(dt=>{
-      const e = (dataByDate[dt]||{})[item.id];
-      const has = e && e.count !== '' && e.count !== undefined;
-      return has ? String(e.count) : '–';
+    const staffRows = dates.map(dt=>{
+      const dayEntries = dataByDate[dt] || {};
+      const staffSet = new Set();
+      let filledCount = 0;
+      Object.values(dayEntries).forEach(e=>{
+        if(e && e.count !== '' && e.count !== undefined){
+          filledCount++;
+          if(e.staffName) staffSet.add(e.staffName);
+        }
+      });
+      return [formatDayLabel(dt), `${filledCount}/${state.items.length}`, staffSet.size?Array.from(staffSet).join(', '):'—'];
     });
 
-    let lastCount = null;
-    for(let i=dates.length-1;i>=0;i--){
-      const e = (dataByDate[dates[i]]||{})[item.id];
-      if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
-    }
-    const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : null;
+    doc.setFontSize(11);
+    doc.setTextColor(30,30,30);
+    doc.text('Staff Log by Day', 14, 34);
+    doc.autoTable({
+      startY: 37,
+      head: [['Date','Filled','Staff Who Input']],
+      body: staffRows,
+      styles:{ fontSize:8, cellPadding:2 },
+      headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
+      alternateRowStyles:{ fillColor:[245,245,242] },
+      tableWidth: 120,
+    });
 
-    return [item.name, hasOpening?String(opening):'–', ...dayCells, used!==null?String(used):'—'];
-  });
+    const trendHead = ['Item','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'];
+    const trendRows = state.items.map(item=>{
+      const openingEntry = prevDayEntries[item.id];
+      const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
+      const opening = hasOpening ? Number(openingEntry.count) : null;
 
-  const finalY = doc.lastAutoTable.finalY || 37;
-  doc.setFontSize(11);
-  doc.text('Stock Trend by Item', 14, finalY+10);
-  doc.autoTable({
-    startY: finalY+13,
-    head: [trendHead],
-    body: trendRows,
-    styles:{ fontSize:7, cellPadding:1.5 },
-    headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
-    alternateRowStyles:{ fillColor:[245,245,242] },
-    columnStyles:{ 0:{cellWidth:32} },
-    didParseCell: (data)=>{
-      if(data.section==='body' && (data.column.index===1 || data.column.index===trendHead.length-1)){
-        data.cell.styles.fontStyle='bold';
+      const dayCells = dates.map(dt=>{
+        const e = (dataByDate[dt]||{})[item.id];
+        const has = e && e.count !== '' && e.count !== undefined;
+        return has ? String(e.count) : '–';
+      });
+
+      let lastCount = null;
+      for(let i=dates.length-1;i>=0;i--){
+        const e = (dataByDate[dates[i]]||{})[item.id];
+        if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
       }
-    },
-  });
+      const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : null;
 
-  addPdfFooter(doc);
-  doc.save(`weekly-consumption-${dates[0]}.pdf`);
-  showToast('PDF report downloaded');
+      return [item.name, hasOpening?String(opening):'–', ...dayCells, used!==null?String(used):'—'];
+    });
+
+    const finalY = doc.lastAutoTable.finalY || 37;
+    doc.setFontSize(11);
+    doc.text('Stock Trend by Item', 14, finalY+10);
+    doc.autoTable({
+      startY: finalY+13,
+      head: [trendHead],
+      body: trendRows,
+      styles:{ fontSize:7, cellPadding:1.5 },
+      headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
+      alternateRowStyles:{ fillColor:[245,245,242] },
+      columnStyles:{ 0:{cellWidth:32} },
+      didParseCell: (data)=>{
+        if(data.section==='body' && (data.column.index===1 || data.column.index===trendHead.length-1)){
+          data.cell.styles.fontStyle='bold';
+        }
+      },
+    });
+
+    addPdfFooter(doc);
+    doc.save(`weekly-consumption-${dates[0]}.pdf`);
+    showToast('PDF report downloaded');
+  }catch(err){
+    console.error('Weekly PDF generation failed', err);
+    showToast(`PDF error: ${err.message}`.slice(0,80));
+  }finally{
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
 function switchView(viewName){
