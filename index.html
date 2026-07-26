@@ -45,17 +45,16 @@ body{
 .display{font-family:'Poppins',sans-serif;}
 
 header.top{
-  position:sticky;top:0;z-index:20;
   background:var(--bg);
-  padding:16px 16px 12px;
+  padding:14px 16px 10px;
   border-bottom:1px solid var(--border);
 }
 .brand{
-  display:flex;align-items:center;gap:11px;
-  margin-bottom:12px;
+  display:flex;align-items:center;gap:9px;
+  margin-bottom:8px;
 }
 .brand-logo{
-  width:34px;height:34px;flex-shrink:0;
+  width:26px;height:26px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
 }
 .brand-logo img{
@@ -64,35 +63,40 @@ header.top{
 }
 .brand-text h1{
   font-family:'Poppins',sans-serif;
-  font-size:18px;font-weight:700;margin:0;letter-spacing:0.02em;
+  font-size:14.5px;font-weight:700;margin:0;letter-spacing:0.02em;
   text-transform:uppercase;
 }
-.brand-text .sub{color:var(--text-dim);font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;margin-top:1px;}
+.brand-text .sub{color:var(--text-dim);font-size:9px;letter-spacing:0.05em;text-transform:uppercase;margin-top:0px;}
 
-.field-row{display:flex;flex-direction:column;gap:10px;align-items:flex-start;}
+.field-row{display:flex;flex-direction:column;gap:6px;align-items:flex-start;}
 .field{width:auto;max-width:220px;}
 .field input{width:100%;}
-.field label{display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px;letter-spacing:0.03em;text-transform:uppercase;}
+.field label{display:block;font-size:9.5px;color:var(--text-dim);margin-bottom:2px;letter-spacing:0.03em;text-transform:uppercase;}
 input[type="date"], input[type="text"]{
   width:100%;
   background:var(--surface);
   border:1px solid var(--border);
   color:var(--text);
-  padding:9px 10px;
-  border-radius:10px;
-  font-size:14px;
+  padding:6px 10px;
+  border-radius:9px;
+  font-size:13px;
   font-family:'Poppins',sans-serif;
 }
 input[type="date"]{font-family:'Poppins',monospace;}
 input:focus{outline:2px solid var(--accent-dim);outline-offset:1px;}
 
-.progress-wrap{margin-top:12px;}
-.progress-footer{display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:10px;}
-.submit-btn{padding:7px 16px;font-size:12.5px;white-space:nowrap;}
+.progress-wrap{margin-top:8px;}
+.progress-footer{display:flex;align-items:center;justify-content:space-between;margin-top:5px;gap:10px;}
+.submit-btn{padding:6px 14px;font-size:12px;white-space:nowrap;}
 .submit-btn:disabled{opacity:0.35;background:var(--surface-2);color:var(--text-dim);border-color:var(--border);}
-.progress-bar{height:6px;background:var(--surface);border-radius:99px;overflow:hidden;}
+.submit-btn.submit-success-flash{animation:submitFlash 0.9s ease;}
+@keyframes submitFlash{
+  0%{background:#B5D98A;transform:scale(1.06);}
+  100%{background:var(--accent);transform:scale(1);}
+}
+.progress-bar{height:5px;background:var(--surface);border-radius:99px;overflow:hidden;}
 .progress-fill{height:100%;background:var(--accent);transition:width .3s ease;}
-.progress-label{font-size:11px;color:var(--text-dim);margin-top:6px;font-family:'Poppins',monospace;}
+.progress-label{font-size:10px;color:var(--text-dim);margin-top:5px;font-family:'Poppins',monospace;}
 
 main{padding:14px 16px 8px;max-width:640px;margin:0 auto;}
 
@@ -176,6 +180,7 @@ main{padding:14px 16px 8px;max-width:640px;margin:0 auto;}
 .summary-table td{padding:8px;border-bottom:1px solid var(--border);font-family:'Poppins',monospace;}
 .summary-table tr.low td{color:var(--danger);}
 .summary-table tr.missing td{color:var(--text-dim);font-style:italic;}
+.notes-cell{font-family:'Poppins',sans-serif;font-style:normal;color:var(--warn);max-width:160px;white-space:normal;font-size:11.5px;}
 .tag{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-family:'Poppins',sans-serif;font-weight:700;}
 .tag.ok{background:rgba(141,168,78,0.18);color:var(--accent);}
 .tag.low{background:rgba(163,51,82,0.18);color:var(--danger);}
@@ -364,6 +369,9 @@ nav.bottom .icon{font-size:18px;}
 <main>
 
   <!-- INPUT VIEW -->
+  <div id="itemSearchWrap" style="max-width:640px;margin:10px auto 0;padding:0 16px;">
+    <input type="text" id="itemSearch" placeholder="🔍 Search items..." style="width:100%;">
+  </div>
   <div class="view active" id="view-input"></div>
 
   <!-- SUMMARY VIEW -->
@@ -391,7 +399,7 @@ nav.bottom .icon{font-size:18px;}
         <button class="btn primary" id="exportPdfBtn">⬇ PDF Report</button>
       </div>
       <table class="summary-table" id="summaryTable">
-        <thead><tr><th>Item</th><th>Yesterday</th><th>Today</th><th>Change</th><th>Staff</th><th>Status</th></tr></thead>
+        <thead><tr><th>Item</th><th>Yesterday</th><th>Today</th><th>Change</th><th>Staff</th><th>Status</th><th>Notes</th></tr></thead>
         <tbody id="summaryBody"></tbody>
       </table>
     </div>
@@ -557,6 +565,7 @@ let state = {
   periodAnchorDate: new Date().toISOString().slice(0,10),
   unlocked: false,
   pendingView: null,
+  searchQuery: '',
 };
 
 function getPreviousDate(dateStr){
@@ -629,12 +638,12 @@ async function fetchEntriesBatch(dates){
 function todayKey(){ return state.date; }
 function entryKey(date){ return `entries:${date || state.date}`; }
 
-function showToast(msg){
+function showToast(msg, duration){
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(()=>t.classList.remove('show'), 1400);
+  showToast._timer = setTimeout(()=>t.classList.remove('show'), duration || 2200);
 }
 
 function withTimeout(promise, ms){
@@ -756,11 +765,19 @@ async function submitAllDrafts(){
 
   if(ok){
     state.drafts = {};
-    showToast(`${draftIds.length} item${draftIds.length>1?'s':''} submitted`);
+    showToast(`✅ ${draftIds.length} item${draftIds.length>1?'s':''} submitted successfully`, 2800);
+    flashSubmitSuccess();
   }else{
-    showToast('Failed to save, try again');
+    showToast('❌ Failed to save, try again', 3000);
   }
   return ok;
+}
+
+function flashSubmitSuccess(){
+  const btn = document.getElementById('submitBtn');
+  if(!btn) return;
+  btn.classList.add('submit-success-flash');
+  setTimeout(()=> btn.classList.remove('submit-success-flash'), 900);
 }
 
 function isLow(itemId, count){
@@ -793,12 +810,18 @@ function renderInputView(){
     return;
   }
 
+  const query = (state.searchQuery || '').trim().toLowerCase();
+
   state.categories.forEach(cat=>{
-    const catItems = state.items.filter(i=>i.category===cat.id);
+    let catItems = state.items.filter(i=>i.category===cat.id);
+    if(query){
+      catItems = catItems.filter(i=> i.name.toLowerCase().includes(query));
+      if(catItems.length === 0) return; // hide empty categories while searching
+    }
     const wrap = document.createElement('div');
     wrap.className = 'category';
     const filledCount = catItems.filter(i=> isFilled(i.id)).length;
-    const collapsed = state.collapsedCategories.has(cat.id);
+    const collapsed = query ? false : state.collapsedCategories.has(cat.id);
     wrap.innerHTML = `
       <div class="category-header ${collapsed?'collapsed':''}" data-cat="${cat.id}">
         <div class="name">${cat.name}</div>
@@ -815,6 +838,10 @@ function renderInputView(){
       itemsWrap.appendChild(renderItemCard(item));
     });
   });
+
+  if(query && container.children.length === 0){
+    container.innerHTML = `<div class="empty-state"><p>No items match "${state.searchQuery}"</p></div>`;
+  }
 
   container.querySelectorAll('.category-header').forEach(h=>{
     h.addEventListener('click', ()=>{
@@ -1007,6 +1034,7 @@ function renderDailySummary(){
       <td>${deltaCell}</td>
       <td>${hasEntry ? (entry.staffName||'—') : '—'}</td>
       <td>${statusTag}</td>
+      <td class="notes-cell">${hasEntry && entry.remarks ? entry.remarks : ''}</td>
     </tr>`;
   }).join('');
 
@@ -1084,6 +1112,7 @@ async function renderPeriodSummary(){
 
   const weeklyToolbarHtml = isWeekly ? `
     <div class="summary-toolbar">
+      <button class="btn primary" id="exportWeeklyCsvBtn">⬇ CSV</button>
       <button class="btn primary" id="exportWeeklyPdfBtn">⬇ PDF Report</button>
     </div>
   ` : '';
@@ -1107,8 +1136,10 @@ async function renderPeriodSummary(){
 
   if(isWeekly){
     state.lastWeeklyData = { dates, dataByDate, prevDayEntries, weekStartDate, prevDayDate };
-    const btn = document.getElementById('exportWeeklyPdfBtn');
-    if(btn) btn.addEventListener('click', exportWeeklyPDF);
+    const pdfBtn = document.getElementById('exportWeeklyPdfBtn');
+    if(pdfBtn) pdfBtn.addEventListener('click', exportWeeklyPDF);
+    const csvBtn = document.getElementById('exportWeeklyCsvBtn');
+    if(csvBtn) csvBtn.addEventListener('click', exportWeeklyCSV);
   }
 }
 
@@ -1280,6 +1311,9 @@ async function moveCategory(catId, direction){
 }
 
 async function removeItem(itemId){
+  const item = state.items.find(i=>i.id===itemId);
+  const itemName = item ? item.name : 'this item';
+  if(!confirm(`Remove "${itemName}"? This can't be undone.`)) return;
   state.items = state.items.filter(i=>i.id!==itemId);
   delete state.thresholds[itemId];
   const ok = await saveConfig();
@@ -1296,12 +1330,57 @@ async function removeCategory(catId){
     showToast('Remove or move items out of this category first');
     return;
   }
+  const cat = state.categories.find(c=>c.id===catId);
+  const catName = cat ? cat.name : 'this category';
+  if(!confirm(`Remove "${catName}"? This can't be undone.`)) return;
   state.categories = state.categories.filter(c=>c.id!==catId);
   const ok = await saveConfig();
   if(ok){
     showToast('Category removed');
     renderSettingsView();
   }
+}
+
+function exportWeeklyCSV(){
+  const data = state.lastWeeklyData;
+  if(!data){ showToast('Load the weekly view first'); return; }
+  const { dates, dataByDate, prevDayEntries } = data;
+
+  const header = ['Item','Unit','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'].join(',') + '\n';
+  const esc = (s)=> `"${String(s??'').replace(/"/g,'""')}"`;
+
+  const lines = state.items.map(item=>{
+    const openingEntry = prevDayEntries[item.id];
+    const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
+    const opening = hasOpening ? Number(openingEntry.count) : '';
+
+    const dayCells = dates.map(dt=>{
+      const e = (dataByDate[dt]||{})[item.id];
+      const has = e && e.count !== '' && e.count !== undefined;
+      return has ? e.count : '';
+    });
+
+    let lastCount = null;
+    for(let i=dates.length-1;i>=0;i--){
+      const e = (dataByDate[dates[i]]||{})[item.id];
+      if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
+    }
+    const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : '';
+
+    return [item.name, item.unit, opening, ...dayCells, used].map(esc).join(',');
+  }).join('\n');
+
+  const csv = header + lines;
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `weekly-consumption-${dates[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('CSV exported');
 }
 
 function exportCSV(){
@@ -1594,6 +1673,7 @@ function switchView(viewName){
   document.getElementById(`view-${viewName}`).classList.add('active');
   document.querySelectorAll('nav.bottom button').forEach(b=>b.classList.toggle('active', b.dataset.view===viewName));
   document.getElementById('inputProgressWrap').style.display = viewName === 'input' ? 'block' : 'none';
+  document.getElementById('itemSearchWrap').style.display = viewName === 'input' ? 'block' : 'none';
   if(viewName === 'summary') renderSummaryView();
   if(viewName === 'settings') renderSettingsView();
 }
@@ -1670,6 +1750,11 @@ function bindStaticListeners(){
   document.getElementById('staffName').addEventListener('change', (e)=>{
     state.staffName = e.target.value;
     if(e.target.value.trim()) e.target.style.borderColor = '';
+  });
+
+  document.getElementById('itemSearch').addEventListener('input', (e)=>{
+    state.searchQuery = e.target.value;
+    renderInputView();
   });
 
   document.getElementById('submitBtn').addEventListener('click', async ()=>{
