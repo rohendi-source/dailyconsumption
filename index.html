@@ -1493,8 +1493,23 @@ function ensureXlsxLib(){
   return xlsxLibPromise;
 }
 
-function downloadPdfBlob(doc, filename){
+async function downloadPdfBlob(doc, filename){
   const blob = doc.output('blob');
+
+  // Prefer the native OS share sheet (works well on iOS Safari) so the
+  // person gets "Save to Files" / WhatsApp / etc. directly, bypassing
+  // Safari's built-in PDF viewer entirely.
+  try{
+    const file = new File([blob], filename, { type: 'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], title: filename });
+      return;
+    }
+  }catch(err){
+    if(err && err.name === 'AbortError') return; // user cancelled the share sheet, not an error
+    // otherwise fall through to the download-link fallback below
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1604,8 +1619,8 @@ async function exportDailyPDF(){
     });
 
     addPdfFooter(doc);
-    downloadPdfBlob(doc, `daily-consumption-${state.date}.pdf`);
-    showToast('PDF report downloaded');
+    await downloadPdfBlob(doc, `daily-consumption-${state.date}.pdf`);
+    showToast('PDF report ready');
   }catch(err){
     console.error('PDF generation failed', err);
     showToast(`PDF error: ${err.message}`.slice(0,80));
@@ -1707,8 +1722,8 @@ async function exportWeeklyPDF(){
     });
 
     addPdfFooter(doc);
-    downloadPdfBlob(doc, `weekly-consumption-${dates[0]}.pdf`);
-    showToast('PDF report downloaded');
+    await downloadPdfBlob(doc, `weekly-consumption-${dates[0]}.pdf`);
+    showToast('PDF report ready');
   }catch(err){
     console.error('Weekly PDF generation failed', err);
     showToast(`PDF error: ${err.message}`.slice(0,80));
