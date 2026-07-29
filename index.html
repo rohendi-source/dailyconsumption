@@ -401,7 +401,7 @@ nav.bottom .icon{font-size:18px;}
         <div class="stat accent"><div class="num" id="statOk">0</div><div class="lbl">OK</div></div>
       </div>
       <div class="summary-toolbar">
-        <button class="btn primary" id="exportBtn">⬇ CSV</button>
+        <button class="btn primary" id="exportBtn">⬇ Excel</button>
         <button class="btn primary" id="exportPdfBtn">⬇ PDF Report</button>
       </div>
       <table class="summary-table" id="summaryTable">
@@ -1118,7 +1118,7 @@ async function renderPeriodSummary(){
 
   const weeklyToolbarHtml = isWeekly ? `
     <div class="summary-toolbar">
-      <button class="btn primary" id="exportWeeklyCsvBtn">⬇ CSV</button>
+      <button class="btn primary" id="exportWeeklyCsvBtn">⬇ Excel</button>
       <button class="btn primary" id="exportWeeklyPdfBtn">⬇ PDF Report</button>
     </div>
   ` : '';
@@ -1347,71 +1347,111 @@ async function removeCategory(catId){
   }
 }
 
-function exportWeeklyCSV(){
+async function exportWeeklyCSV(){
   const data = state.lastWeeklyData;
   if(!data){ showToast('Load the weekly view first'); return; }
-  const { dates, dataByDate, prevDayEntries } = data;
 
-  const header = ['Item','Unit','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'].join(',') + '\n';
-  const esc = (s)=> `"${String(s??'').replace(/"/g,'""')}"`;
+  const btn = document.getElementById('exportWeeklyCsvBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Loading...';
+  btn.disabled = true;
+  try{
+    await ensureXlsxLib();
+  }catch(e){
+    showToast('Could not load Excel tools — check your connection');
+    btn.textContent = originalText;
+    btn.disabled = false;
+    return;
+  }
 
-  const lines = state.items.map(item=>{
-    const openingEntry = prevDayEntries[item.id];
-    const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
-    const opening = hasOpening ? Number(openingEntry.count) : '';
+  try{
+    const { dates, dataByDate, prevDayEntries } = data;
+    const header = ['Item','Unit','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'];
 
-    const dayCells = dates.map(dt=>{
-      const e = (dataByDate[dt]||{})[item.id];
-      const has = e && e.count !== '' && e.count !== undefined;
-      return has ? e.count : '';
+    const rows = state.items.map(item=>{
+      const openingEntry = prevDayEntries[item.id];
+      const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
+      const opening = hasOpening ? Number(openingEntry.count) : '';
+
+      const dayCells = dates.map(dt=>{
+        const e = (dataByDate[dt]||{})[item.id];
+        const has = e && e.count !== '' && e.count !== undefined;
+        return has ? Number(e.count) : '';
+      });
+
+      let lastCount = null;
+      for(let i=dates.length-1;i>=0;i--){
+        const e = (dataByDate[dates[i]]||{})[item.id];
+        if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
+      }
+      const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : '';
+
+      return [item.name, item.unit, opening, ...dayCells, used];
     });
 
-    let lastCount = null;
-    for(let i=dates.length-1;i>=0;i--){
-      const e = (dataByDate[dates[i]]||{})[item.id];
-      if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
-    }
-    const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : '';
-
-    return [item.name, item.unit, opening, ...dayCells, used].map(esc).join(',');
-  }).join('\n');
-
-  const csv = header + lines;
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `weekly-consumption-${dates[0]}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('CSV exported');
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws['!cols'] = [{wch:26},{wch:10},{wch:8}, ...dates.map(()=>({wch:7})), {wch:8}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Weekly Trend');
+    XLSX.writeFile(wb, `weekly-consumption-${dates[0]}.xlsx`);
+    showToast('Excel exported');
+  }catch(err){
+    console.error('Weekly Excel export failed', err);
+    showToast(`Export error: ${err.message}`.slice(0,80));
+  }finally{
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
-function exportCSV(){
-  const header = 'Item,Unit,Yesterday,Today,Change,Staff,Remarks,Status\n';
-  const lines = state.items.map(item=>{
-    const entry = state.entries[item.id];
-    const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
-    const lowNow = hasEntry && isLow(item.id, entry.count);
-    const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low' : 'OK');
-    const prevCount = formatDelta(item.id);
-    const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
-    const esc = (s)=> `"${String(s??'').replace(/"/g,'""')}"`;
-    return [item.name, item.unit, prevCount !== null ? prevCount : '', hasEntry?entry.count:'', diff, hasEntry?(entry.staffName||''):'', hasEntry?(entry.remarks||''):'', status].map(esc).join(',');
-  }).join('\n');
-  const csv = header + lines;
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `inventory-${state.date}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('CSV exported');
+async function exportCSV(){
+  const btn = document.getElementById('exportBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Loading...';
+  btn.disabled = true;
+  try{
+    await ensureXlsxLib();
+  }catch(e){
+    showToast('Could not load Excel tools — check your connection');
+    btn.textContent = originalText;
+    btn.disabled = false;
+    return;
+  }
+
+  try{
+    const header = ['Item','Unit','Yesterday','Today','Change','Staff','Remarks','Status'];
+    const rows = state.items.map(item=>{
+      const entry = state.entries[item.id];
+      const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
+      const lowNow = hasEntry && isLow(item.id, entry.count);
+      const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low' : 'OK');
+      const prevCount = formatDelta(item.id);
+      const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
+      return [
+        item.name,
+        item.unit,
+        prevCount !== null ? prevCount : '',
+        hasEntry ? Number(entry.count) : '',
+        diff,
+        hasEntry ? (entry.staffName||'') : '',
+        hasEntry ? (entry.remarks||'') : '',
+        status,
+      ];
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws['!cols'] = [{wch:26},{wch:10},{wch:10},{wch:8},{wch:8},{wch:14},{wch:24},{wch:10}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Daily');
+    XLSX.writeFile(wb, `inventory-${state.date}.xlsx`);
+    showToast('Excel exported');
+  }catch(err){
+    console.error('Excel export failed', err);
+    showToast(`Export error: ${err.message}`.slice(0,80));
+  }finally{
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
 function loadScript(src){
@@ -1442,20 +1482,27 @@ function ensurePdfLibs(){
   return pdfLibsPromise;
 }
 
+let xlsxLibPromise = null;
+function ensureXlsxLib(){
+  if(!xlsxLibPromise){
+    xlsxLibPromise = loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js').catch(err=>{
+      xlsxLibPromise = null;
+      throw err;
+    });
+  }
+  return xlsxLibPromise;
+}
+
 function downloadPdfBlob(doc, filename){
-  const pdfBlob = doc.output('blob');
-  const reader = new FileReader();
-  reader.onload = function(){
-    const a = document.createElement('a');
-    // Force a generic binary data URI so Safari's content sniffer doesn't
-    // recognize the %PDF signature and hand it to the inline viewer.
-    a.href = reader.result.replace('data:application/pdf', 'data:application/octet-stream');
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-  reader.readAsDataURL(pdfBlob);
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
 }
 
 function getReloadLogoDataUrl(){
