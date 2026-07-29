@@ -1428,10 +1428,12 @@ function loadScript(src){
 let pdfLibsPromise = null;
 function ensurePdfLibs(){
   if(!pdfLibsPromise){
-    pdfLibsPromise = Promise.all([
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'),
-    ]).catch(err=>{
+    pdfLibsPromise = (async ()=>{
+      // jspdf-autotable must attach itself to an ALREADY-loaded jsPDF,
+      // so these have to load one after another, not in parallel.
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    })().catch(err=>{
       pdfLibsPromise = null; // allow retry on next attempt
       throw err;
     });
