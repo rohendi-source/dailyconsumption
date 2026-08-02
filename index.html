@@ -187,6 +187,7 @@ main{padding:14px 16px 8px;max-width:640px;margin:0 auto;}
 .summary-table tr.low td{color:var(--danger);}
 .summary-table tr.missing td{color:var(--text-dim);font-style:italic;}
 .notes-cell{font-family:'Poppins',sans-serif;font-style:normal;color:var(--warn);max-width:160px;white-space:normal;font-size:11.5px;}
+.deleted-tag{font-size:9px;color:var(--text-dim);font-style:italic;background:var(--surface-2);padding:1px 5px;border-radius:5px;margin-left:4px;}
 .tag{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-family:'Poppins',sans-serif;font-weight:700;}
 .tag.ok{background:rgba(141,168,78,0.18);color:var(--accent);}
 .tag.low{background:rgba(163,51,82,0.18);color:var(--danger);}
@@ -273,7 +274,7 @@ select{
 }
 
 .manage-row{
-  display:flex;align-items:center;gap:8px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   background:var(--surface);border:1px solid var(--border);border-radius:12px;
   padding:9px 10px;margin-bottom:8px;
 }
@@ -288,6 +289,14 @@ select{
 }
 .manage-row button.remove-btn{color:var(--danger);}
 .manage-row button:disabled{opacity:0.25;}
+
+.edit-item-form{
+  width:100%;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);
+  display:flex;flex-direction:column;gap:6px;
+}
+.edit-item-form input{font-size:12.5px;padding:6px 8px;}
+.edit-item-actions{display:flex;gap:6px;}
+.edit-item-actions .btn{flex:1;padding:6px 10px;font-size:11.5px;}
 
 /* Bottom nav */
 nav.bottom{
@@ -555,7 +564,7 @@ const DEFAULT_CATEGORIES = [
   {id:'misc', name:'Misc'},
 ];
 
-const ACCESS_PASSWORD = '123123';
+const ACCESS_PASSWORD = 'Kontolodon123';
 
 let state = {
   date: new Date().toISOString().slice(0,10),
@@ -862,6 +871,52 @@ function renderInputView(){
   updateSubmitButton();
 }
 
+// Returns the display name/unit for an item, preferring the snapshot saved
+// with the entry at counting time (so past reports stay accurate even if
+// the item was later renamed, had its unit changed, or was deleted).
+// Same idea as getReportItemList, but merges across multiple dates' worth
+// of entries (used for Weekly/Monthly trend tables) so deleted items with
+// data anywhere in the period still show up.
+function getReportItemListMulti(dataByDate){
+  const liveIds = new Set(state.items.map(i=>i.id));
+  const list = state.items.map(i=>({ id:i.id, deleted:false }));
+  const seenDeleted = new Set();
+  Object.values(dataByDate || {}).forEach(entriesObj=>{
+    Object.keys(entriesObj || {}).forEach(itemId=>{
+      if(!liveIds.has(itemId) && !seenDeleted.has(itemId)){
+        list.push({ id:itemId, deleted:true });
+        seenDeleted.add(itemId);
+      }
+    });
+  });
+  return list;
+}
+
+function resolveItemDisplay(itemId, entry){
+  if(entry && entry.itemName){
+    return { name: entry.itemName, unit: entry.itemUnit || '' };
+  }
+  const live = state.items.find(i=>i.id===itemId);
+  if(live) return { name: live.name, unit: live.unit };
+  return { name: itemId, unit: '' };
+}
+
+// Builds the list of items to show in a daily-style report: every currently
+// configured item, PLUS any item that has data for this specific set of
+// entries but has since been deleted from Settings (shown using its
+// snapshotted name/unit, so historical data for deleted items isn't lost).
+function getReportItemList(entriesObj){
+  const liveIds = new Set(state.items.map(i=>i.id));
+  const list = state.items.map(i=>({ id:i.id, deleted:false }));
+  Object.keys(entriesObj || {}).forEach(itemId=>{
+    if(!liveIds.has(itemId)){
+      list.push({ id:itemId, deleted:true });
+      liveIds.add(itemId); // avoid duplicates if it appears in multiple places
+    }
+  });
+  return list;
+}
+
 function formatDelta(itemId){
   const prev = state.previousEntries[itemId];
   if(!prev || prev.count === '' || prev.count === undefined) return null;
@@ -931,6 +986,8 @@ function renderItemCard(item){
     state.drafts[item.id] = {
       count: countInput.value,
       remarks: remarksInput.value,
+      itemName: item.name,
+      itemUnit: item.unit,
     };
     refreshCardVisual();
     updateSubmitButton();
@@ -1011,19 +1068,21 @@ function updateSubmitButton(){
 }
 
 function renderDailySummary(){
-  const total = state.items.length;
+  const reportItems = getReportItemList(state.entries);
+  const total = reportItems.length;
   let filled = 0, low = 0, ok = 0;
-  const rows = state.items.map(item=>{
-    const entry = state.entries[item.id];
+  const rows = reportItems.map(({id, deleted})=>{
+    const entry = state.entries[id];
+    const display = resolveItemDisplay(id, entry);
     const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
     if(hasEntry) filled++;
-    const lowNow = hasEntry && isLow(item.id, entry.count);
+    const lowNow = hasEntry && isLow(id, entry.count);
     if(hasEntry){ if(lowNow) low++; else ok++; }
     let statusTag = '<span class="tag missing">Not filled</span>';
     if(hasEntry) statusTag = lowNow ? '<span class="tag low">Low</span>' : '<span class="tag ok">OK</span>';
     const rowClass = !hasEntry ? 'missing' : (lowNow ? 'low' : '');
 
-    const prevCount = formatDelta(item.id);
+    const prevCount = formatDelta(id);
     const prevCell = prevCount !== null ? prevCount : '—';
     let deltaCell = '—';
     if(prevCount !== null && hasEntry){
@@ -1033,8 +1092,10 @@ function renderDailySummary(){
       deltaCell = `<span class="delta ${cls}">${sign}${diff}</span>`;
     }
 
+    const nameLabel = deleted ? `${display.name} <span class="deleted-tag">deleted</span>` : display.name;
+
     return `<tr class="${rowClass}">
-      <td>${item.name}</td>
+      <td>${nameLabel}</td>
       <td>${prevCell}</td>
       <td>${hasEntry ? entry.count : '—'}</td>
       <td>${deltaCell}</td>
@@ -1083,33 +1144,41 @@ async function renderPeriodSummary(){
   }).join('');
 
   const trendHeader = dates.map(dt=>`<th>${formatShort(dt)}</th>`).join('');
-  const trendRows = state.items.map(item=>{
+  const trendReportItems = getReportItemListMulti(dataByDate);
+  const trendRows = trendReportItems.map(({id, deleted})=>{
     const cells = dates.map(dt=>{
       const dayEntries = dataByDate[dt] || {};
-      const e = dayEntries[item.id];
+      const e = dayEntries[id];
       const has = e && e.count !== '' && e.count !== undefined;
-      const low = has && isLow(item.id, e.count);
+      const low = has && isLow(id, e.count);
       return `<td class="${low?'low-cell':''}">${has?e.count:'–'}</td>`;
     }).join('');
+
+    // Find any entry for this item within the period to resolve its
+    // (possibly historical/snapshotted) display name.
+    let anyEntry = null;
+    for(const dt of dates){ if((dataByDate[dt]||{})[id]){ anyEntry = (dataByDate[dt]||{})[id]; break; } }
+    const display = resolveItemDisplay(id, anyEntry);
 
     let openingCell = '';
     let usedCell = '';
     if(isWeekly){
-      const openingEntry = prevDayEntries[item.id];
+      const openingEntry = prevDayEntries[id];
       const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
       const opening = hasOpening ? Number(openingEntry.count) : null;
       openingCell = `<td class="opening-cell">${hasOpening ? opening : '–'}</td>`;
 
       let lastCount = null;
       for(let i=dates.length-1; i>=0; i--){
-        const e = (dataByDate[dates[i]]||{})[item.id];
+        const e = (dataByDate[dates[i]]||{})[id];
         if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
       }
       const used = (hasOpening && lastCount !== null) ? (opening - lastCount) : null;
       usedCell = `<td class="used-cell">${used !== null ? used : '—'}</td>`;
     }
 
-    return `<tr>${isWeekly?openingCell:''}<td class="item-col">${item.name}</td>${cells}${isWeekly?usedCell:''}</tr>`;
+    const nameLabel = deleted ? `${display.name} <span class="deleted-tag">deleted</span>` : display.name;
+    return `<tr>${isWeekly?openingCell:''}<td class="item-col">${nameLabel}</td>${cells}${isWeekly?usedCell:''}</tr>`;
   }).join('');
 
   const openingHintHtml = isWeekly ? `
@@ -1216,6 +1285,7 @@ function renderManageItemsList(){
           <div class="manage-sub">${cat.name} · ${item.unit}</div>
         </div>
         <div class="manage-actions">
+          <button class="edit-btn" aria-label="Edit item">✎</button>
           <button class="up-btn" ${idx===0?'disabled':''} aria-label="Move up">▲</button>
           <button class="down-btn" ${idx===catItems.length-1?'disabled':''} aria-label="Move down">▼</button>
           <button class="remove-btn" aria-label="Remove item">✕</button>
@@ -1224,8 +1294,43 @@ function renderManageItemsList(){
       row.querySelector('.up-btn').addEventListener('click', ()=> moveItemInCategory(item.id, -1));
       row.querySelector('.down-btn').addEventListener('click', ()=> moveItemInCategory(item.id, 1));
       row.querySelector('.remove-btn').addEventListener('click', ()=> removeItem(item.id));
+      row.querySelector('.edit-btn').addEventListener('click', ()=> toggleEditItemRow(row, item));
       wrap.appendChild(row);
     });
+  });
+}
+
+function toggleEditItemRow(row, item){
+  const existingForm = row.querySelector('.edit-item-form');
+  if(existingForm){ existingForm.remove(); return; }
+  // close any other open edit forms first
+  document.querySelectorAll('.edit-item-form').forEach(f=>f.remove());
+
+  const form = document.createElement('div');
+  form.className = 'edit-item-form';
+  form.innerHTML = `
+    <input type="text" class="edit-name-input" value="${item.name}" placeholder="Item name">
+    <input type="text" class="edit-unit-input" value="${item.unit}" placeholder="Unit">
+    <div class="edit-item-actions">
+      <button class="btn edit-save-btn">Save</button>
+      <button class="btn edit-cancel-btn">Cancel</button>
+    </div>
+  `;
+  row.appendChild(form);
+
+  form.querySelector('.edit-cancel-btn').addEventListener('click', ()=> form.remove());
+  form.querySelector('.edit-save-btn').addEventListener('click', async ()=>{
+    const newName = form.querySelector('.edit-name-input').value.trim();
+    const newUnit = form.querySelector('.edit-unit-input').value.trim();
+    if(!newName){ showToast('Item name cannot be empty'); return; }
+    const target = state.items.find(i=>i.id===item.id);
+    target.name = newName;
+    target.unit = newUnit || target.unit;
+    const ok = await saveConfig();
+    if(ok){
+      showToast('Item updated');
+      renderSettingsView();
+    }
   });
 }
 
@@ -1368,25 +1473,29 @@ async function exportWeeklyCSV(){
     const { dates, dataByDate, prevDayEntries } = data;
     const header = ['Item','Unit','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'];
 
-    const rows = state.items.map(item=>{
-      const openingEntry = prevDayEntries[item.id];
+    const rows = getReportItemListMulti(dataByDate).map(({id, deleted})=>{
+      const openingEntry = prevDayEntries[id];
       const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
       const opening = hasOpening ? Number(openingEntry.count) : '';
 
       const dayCells = dates.map(dt=>{
-        const e = (dataByDate[dt]||{})[item.id];
+        const e = (dataByDate[dt]||{})[id];
         const has = e && e.count !== '' && e.count !== undefined;
         return has ? Number(e.count) : '';
       });
 
       let lastCount = null;
       for(let i=dates.length-1;i>=0;i--){
-        const e = (dataByDate[dates[i]]||{})[item.id];
+        const e = (dataByDate[dates[i]]||{})[id];
         if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
       }
       const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : '';
 
-      return [item.name, item.unit, opening, ...dayCells, used];
+      let anyEntry = null;
+      for(const dt of dates){ if((dataByDate[dt]||{})[id]){ anyEntry = (dataByDate[dt]||{})[id]; break; } }
+      const display = resolveItemDisplay(id, anyEntry || openingEntry);
+
+      return [display.name + (deleted ? ' (deleted)' : ''), display.unit, opening, ...dayCells, used];
     });
 
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
@@ -1420,16 +1529,17 @@ async function exportCSV(){
 
   try{
     const header = ['Item','Unit','Yesterday','Today','Change','Staff','Remarks','Status'];
-    const rows = state.items.map(item=>{
-      const entry = state.entries[item.id];
+    const rows = getReportItemList(state.entries).map(({id, deleted})=>{
+      const entry = state.entries[id];
+      const display = resolveItemDisplay(id, entry);
       const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
-      const lowNow = hasEntry && isLow(item.id, entry.count);
+      const lowNow = hasEntry && isLow(id, entry.count);
       const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low' : 'OK');
-      const prevCount = formatDelta(item.id);
+      const prevCount = formatDelta(id);
       const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
       return [
-        item.name,
-        item.unit,
+        display.name + (deleted ? ' (deleted)' : ''),
+        display.unit,
         prevCount !== null ? prevCount : '',
         hasEntry ? Number(entry.count) : '',
         diff,
@@ -1578,17 +1688,19 @@ async function exportDailyPDF(){
     addPdfHeader(doc, 'Daily Consumption Report', `${dateLabel}  ·  Support Equipment Inventory`);
 
     let filled=0, low=0, ok=0;
-    const rows = state.items.map(item=>{
-      const entry = state.entries[item.id];
+    const reportItems = getReportItemList(state.entries);
+    const rows = reportItems.map(({id, deleted})=>{
+      const entry = state.entries[id];
+      const display = resolveItemDisplay(id, entry);
       const hasEntry = entry && entry.count !== '' && entry.count !== undefined;
-      const lowNow = hasEntry && isLow(item.id, entry.count);
+      const lowNow = hasEntry && isLow(id, entry.count);
       if(hasEntry){ filled++; lowNow ? low++ : ok++; }
       const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low Stock' : 'OK');
-      const prevCount = formatDelta(item.id);
+      const prevCount = formatDelta(id);
       const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
       return [
-        item.name,
-        item.unit,
+        display.name + (deleted ? ' (deleted)' : ''),
+        display.unit,
         prevCount !== null ? String(prevCount) : '—',
         hasEntry ? String(entry.count) : '—',
         diff === '' ? '—' : (diff>0?`+${diff}`:String(diff)),
@@ -1599,7 +1711,7 @@ async function exportDailyPDF(){
 
     doc.setFontSize(10);
     doc.setTextColor(60,60,60);
-    doc.text(`Filled: ${filled}/${state.items.length}    Low Stock: ${low}    OK: ${ok}`, 14, 34);
+    doc.text(`Filled: ${filled}/${reportItems.length}    Low Stock: ${low}    OK: ${ok}`, 14, 34);
 
     doc.autoTable({
       startY: 38,
@@ -1682,25 +1794,29 @@ async function exportWeeklyPDF(){
     });
 
     const trendHead = ['Item','Opening', ...dates.map(dt=>formatShort(dt)), 'Used'];
-    const trendRows = state.items.map(item=>{
-      const openingEntry = prevDayEntries[item.id];
+    const trendRows = getReportItemListMulti(dataByDate).map(({id, deleted})=>{
+      const openingEntry = prevDayEntries[id];
       const hasOpening = openingEntry && openingEntry.count !== '' && openingEntry.count !== undefined;
       const opening = hasOpening ? Number(openingEntry.count) : null;
 
       const dayCells = dates.map(dt=>{
-        const e = (dataByDate[dt]||{})[item.id];
+        const e = (dataByDate[dt]||{})[id];
         const has = e && e.count !== '' && e.count !== undefined;
         return has ? String(e.count) : '–';
       });
 
       let lastCount = null;
       for(let i=dates.length-1;i>=0;i--){
-        const e = (dataByDate[dates[i]]||{})[item.id];
+        const e = (dataByDate[dates[i]]||{})[id];
         if(e && e.count !== '' && e.count !== undefined){ lastCount = Number(e.count); break; }
       }
       const used = (hasOpening && lastCount !== null) ? (opening-lastCount) : null;
 
-      return [item.name, hasOpening?String(opening):'–', ...dayCells, used!==null?String(used):'—'];
+      let anyEntry = null;
+      for(const dt of dates){ if((dataByDate[dt]||{})[id]){ anyEntry = (dataByDate[dt]||{})[id]; break; } }
+      const display = resolveItemDisplay(id, anyEntry || openingEntry);
+
+      return [display.name + (deleted ? ' (deleted)' : ''), hasOpening?String(opening):'–', ...dayCells, used!==null?String(used):'—'];
     });
 
     const finalY = doc.lastAutoTable.finalY || 37;
