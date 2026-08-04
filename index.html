@@ -771,7 +771,7 @@ async function findLastSubmissionDate(beforeDate, maxLookback = 30){
     d.setDate(d.getDate() - 1);
     candidates.push(d.toISOString().slice(0,10));
   }
-  const chunkSize = 5;
+  const chunkSize = 3;
   for(let start=0; start<candidates.length; start+=chunkSize){
     const chunk = candidates.slice(start, start+chunkSize);
     const results = await fetchEntriesBatch(chunk);
@@ -788,22 +788,22 @@ async function findLastSubmissionDate(beforeDate, maxLookback = 30){
 async function loadEntriesForDate(date){
   state.drafts = {};
 
-  const [todayResult, prevResult] = await Promise.allSettled([
-    withTimeout(window.storage.get(entryKey(date), true), 4000),
-    findLastSubmissionDate(date),
-  ]);
-
-  if(todayResult.status === 'fulfilled' && todayResult.value){
-    try{ state.entries = JSON.parse(todayResult.value.value); }
-    catch(e){ state.entries = {}; }
-  }else{
+  // Fetch today's data FIRST, on its own — this is the critical, must-not-fail
+  // request. Only after it's done do we go hunt for the last submission date,
+  // so that search doesn't compete with (and potentially starve out) the
+  // request that actually matters most.
+  try{
+    const todayRes = await withTimeout(window.storage.get(entryKey(date), true), 6000);
+    state.entries = todayRes ? JSON.parse(todayRes.value) : {};
+  }catch(e){
     state.entries = {};
   }
 
-  if(prevResult.status === 'fulfilled' && prevResult.value){
-    state.previousEntries = prevResult.value.entries;
-    state.previousActualDate = prevResult.value.date;
-  }else{
+  try{
+    const found = await findLastSubmissionDate(date);
+    state.previousEntries = found.entries;
+    state.previousActualDate = found.date;
+  }catch(e){
     state.previousEntries = {};
     state.previousActualDate = null;
   }
