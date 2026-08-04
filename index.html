@@ -161,8 +161,10 @@ main{padding:14px 16px 8px;max-width:640px;margin:0 auto;}
   background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
   padding:6px 2px;
 }
-.item-meta{display:flex;gap:8px;margin-top:6px;}
+.item-meta{display:flex;gap:6px;margin-top:6px;}
 .item-meta input{font-size:10.5px;padding:6px 7px;}
+.item-meta .stockin-input{flex:0 0 68px;text-align:center;}
+.item-meta .remarks-input{flex:1;min-width:0;}
 .threshold-note{font-size:9px;color:var(--text-dim);margin-top:5px;font-family:'Poppins',monospace;}
 
 .delta-row{
@@ -447,7 +449,7 @@ nav.bottom .icon{font-size:18px;}
         <button class="btn primary" id="exportPdfBtn">⬇ PDF Report</button>
       </div>
       <table class="summary-table" id="summaryTable">
-        <thead><tr><th>Item</th><th>Yesterday</th><th>Today</th><th>Change</th><th>Staff</th><th>Status</th><th>Notes</th></tr></thead>
+        <thead><tr><th>Item</th><th id="thYesterday">Yesterday</th><th id="thToday">Today</th><th>Stock In</th><th>Usage</th><th>Staff</th><th>Status</th><th>Notes</th></tr></thead>
         <tbody id="summaryBody"></tbody>
       </table>
     </div>
@@ -604,7 +606,8 @@ let state = {
   staffName: '',
   entries: {},      // itemId -> {count, remarks, staffName, timestamp} — committed/saved
   drafts: {},       // itemId -> {count, remarks} — pending, not yet submitted
-  previousEntries: {}, // itemId -> {count, ...} from the day before
+  previousEntries: {}, // itemId -> {count, ...} from the last date that had submissions
+  previousActualDate: null, // the actual date previousEntries came from (may skip gap days)
   thresholds: {},   // itemId -> number
   items: [],        // mutable copy of DEFAULT_ITEMS, editable via Settings
   categories: [],   // mutable copy of DEFAULT_CATEGORIES, editable via Settings
@@ -671,7 +674,7 @@ async function fetchEntriesBatch(dates){
       const i = idx++;
       const dt = dates[i];
       try{
-        const res = await withTimeout(window.storage.get(entryKey(dt), true), 4000);
+        const res = await withTimeout(window.storage.get(entryKey(dt), true), 7000);
         result[dt] = res ? JSON.parse(res.value) : {};
       }catch(e){
         result[dt] = {};
@@ -757,13 +760,37 @@ async function saveThresholds(){
   }catch(e){ console.error('threshold save failed', e); }
 }
 
+// Searches backward from `beforeDate` (exclusive) for the most recent date
+// that actually has submitted data, skipping any gap days with nothing
+// filled in. This way "Yesterday" always means "the last time someone
+// submitted", not strictly the literal calendar day before.
+async function findLastSubmissionDate(beforeDate, maxLookback = 30){
+  const candidates = [];
+  const d = new Date(beforeDate + 'T00:00:00');
+  for(let i=1; i<=maxLookback; i++){
+    d.setDate(d.getDate() - 1);
+    candidates.push(d.toISOString().slice(0,10));
+  }
+  const chunkSize = 5;
+  for(let start=0; start<candidates.length; start+=chunkSize){
+    const chunk = candidates.slice(start, start+chunkSize);
+    const results = await fetchEntriesBatch(chunk);
+    for(const dt of chunk){
+      const entries = results[dt];
+      if(entries && Object.keys(entries).length > 0){
+        return { date: dt, entries };
+      }
+    }
+  }
+  return { date: null, entries: {} };
+}
+
 async function loadEntriesForDate(date){
   state.drafts = {};
-  const prevDate = getPreviousDate(date);
 
   const [todayResult, prevResult] = await Promise.allSettled([
     withTimeout(window.storage.get(entryKey(date), true), 4000),
-    withTimeout(window.storage.get(entryKey(prevDate), true), 4000),
+    findLastSubmissionDate(date),
   ]);
 
   if(todayResult.status === 'fulfilled' && todayResult.value){
@@ -774,10 +801,11 @@ async function loadEntriesForDate(date){
   }
 
   if(prevResult.status === 'fulfilled' && prevResult.value){
-    try{ state.previousEntries = JSON.parse(prevResult.value.value); }
-    catch(e){ state.previousEntries = {}; }
+    state.previousEntries = prevResult.value.entries;
+    state.previousActualDate = prevResult.value.date;
   }else{
     state.previousEntries = {};
+    state.previousActualDate = null;
   }
 }
 
@@ -1004,6 +1032,7 @@ function renderItemCard(item){
       <button class="inc" aria-label="Increase">+</button>
     </div>
     <div class="item-meta">
+      <input type="text" inputmode="numeric" pattern="[0-9]*" class="stockin-input" placeholder="+ Stock In" value="${eff.stockIn||''}">
       <input type="text" class="remarks-input" placeholder="Notes..." value="${eff.remarks||''}">
     </div>
     ${pending ? `<div class="pending-note">Not submitted yet</div>` : ''}
@@ -1011,6 +1040,7 @@ function renderItemCard(item){
   `;
 
   const countInput = card.querySelector('.count-input');
+  const stockInInput = card.querySelector('.stockin-input');
   const remarksInput = card.querySelector('.remarks-input');
   const decBtn = card.querySelector('.dec');
   const incBtn = card.querySelector('.inc');
@@ -1019,6 +1049,7 @@ function renderItemCard(item){
     state.drafts[item.id] = {
       count: countInput.value,
       remarks: remarksInput.value,
+      stockIn: stockInInput.value,
       itemName: item.name,
       itemUnit: item.unit,
     };
@@ -1072,7 +1103,11 @@ function renderItemCard(item){
   countInput.addEventListener('input', ()=>{
     countInput.value = countInput.value.replace(/[^0-9]/g,'');
   });
+  stockInInput.addEventListener('input', ()=>{
+    stockInInput.value = stockInInput.value.replace(/[^0-9]/g,'');
+  });
   countInput.addEventListener('change', markDraft);
+  stockInInput.addEventListener('change', markDraft);
   remarksInput.addEventListener('change', markDraft);
 
   return card;
@@ -1100,7 +1135,14 @@ function updateSubmitButton(){
   btn.textContent = pendingCount > 0 ? `Submit (${pendingCount})` : 'Submit';
 }
 
+function getPreviousLabel(){
+  return state.previousActualDate ? formatShort(state.previousActualDate) : '—';
+}
+
 function renderDailySummary(){
+  document.getElementById('thYesterday').textContent = getPreviousLabel();
+  document.getElementById('thToday').textContent = formatShort(state.date);
+
   const reportItems = getReportItemList(state.entries);
   const total = reportItems.length;
   let filled = 0, low = 0, ok = 0;
@@ -1117,12 +1159,15 @@ function renderDailySummary(){
 
     const prevCount = formatDelta(id);
     const prevCell = prevCount !== null ? prevCount : '—';
-    let deltaCell = '—';
+    const stockIn = (hasEntry && entry.stockIn !== undefined && entry.stockIn !== '') ? Number(entry.stockIn) : null;
+    const stockInCell = stockIn !== null ? `+${stockIn}` : '—';
+
+    let usageCell = '—';
     if(prevCount !== null && hasEntry){
-      const diff = Number(entry.count) - prevCount;
-      const sign = diff > 0 ? '+' : '';
-      const cls = diff < 0 ? 'down' : (diff > 0 ? 'up' : 'flat');
-      deltaCell = `<span class="delta ${cls}">${sign}${diff}</span>`;
+      const usage = (prevCount + (stockIn||0)) - Number(entry.count);
+      const sign = usage > 0 ? '' : (usage < 0 ? '' : '');
+      const cls = usage > 0 ? 'down' : (usage < 0 ? 'up' : 'flat');
+      usageCell = `<span class="delta ${cls}">${usage}</span>`;
     }
 
     const nameLabel = deleted ? `${display.name} <span class="deleted-tag">deleted</span>` : display.name;
@@ -1131,7 +1176,8 @@ function renderDailySummary(){
       <td>${nameLabel}</td>
       <td>${prevCell}</td>
       <td>${hasEntry ? entry.count : '—'}</td>
-      <td>${deltaCell}</td>
+      <td>${stockInCell}</td>
+      <td>${usageCell}</td>
       <td>${hasEntry ? (entry.staffName||'—') : '—'}</td>
       <td>${statusTag}</td>
       <td class="notes-cell">${hasEntry && entry.remarks ? entry.remarks : ''}</td>
@@ -1561,7 +1607,7 @@ async function exportCSV(){
   }
 
   try{
-    const header = ['Item','Unit','Yesterday','Today','Change','Staff','Remarks','Status'];
+    const header = ['Item','Unit', getPreviousLabel(), formatShort(state.date), 'Stock In','Usage','Staff','Remarks','Status'];
     const rows = getReportItemList(state.entries).map(({id, deleted})=>{
       const entry = state.entries[id];
       const display = resolveItemDisplay(id, entry);
@@ -1569,13 +1615,15 @@ async function exportCSV(){
       const lowNow = hasEntry && isLow(id, entry.count);
       const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low' : 'OK');
       const prevCount = formatDelta(id);
-      const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
+      const stockIn = (hasEntry && entry.stockIn !== undefined && entry.stockIn !== '') ? Number(entry.stockIn) : '';
+      const usage = (prevCount !== null && hasEntry) ? ((prevCount + (stockIn||0)) - Number(entry.count)) : '';
       return [
         display.name + (deleted ? ' (deleted)' : ''),
         display.unit,
         prevCount !== null ? prevCount : '',
         hasEntry ? Number(entry.count) : '',
-        diff,
+        stockIn,
+        usage,
         hasEntry ? (entry.staffName||'') : '',
         hasEntry ? (entry.remarks||'') : '',
         status,
@@ -1583,7 +1631,7 @@ async function exportCSV(){
     });
 
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = [{wch:26},{wch:10},{wch:10},{wch:8},{wch:8},{wch:14},{wch:24},{wch:10}];
+    ws['!cols'] = [{wch:26},{wch:10},{wch:10},{wch:10},{wch:9},{wch:8},{wch:14},{wch:24},{wch:10}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Daily');
     XLSX.writeFile(wb, `inventory-${state.date}.xlsx`);
@@ -1730,13 +1778,15 @@ async function exportDailyPDF(){
       if(hasEntry){ filled++; lowNow ? low++ : ok++; }
       const status = !hasEntry ? 'Not filled' : (lowNow ? 'Low Stock' : 'OK');
       const prevCount = formatDelta(id);
-      const diff = (prevCount !== null && hasEntry) ? (Number(entry.count) - prevCount) : '';
+      const stockIn = (hasEntry && entry.stockIn !== undefined && entry.stockIn !== '') ? Number(entry.stockIn) : null;
+      const usage = (prevCount !== null && hasEntry) ? ((prevCount + (stockIn||0)) - Number(entry.count)) : '';
       return [
         display.name + (deleted ? ' (deleted)' : ''),
         display.unit,
         prevCount !== null ? String(prevCount) : '—',
         hasEntry ? String(entry.count) : '—',
-        diff === '' ? '—' : (diff>0?`+${diff}`:String(diff)),
+        stockIn !== null ? `+${stockIn}` : '—',
+        usage === '' ? '—' : String(usage),
         hasEntry ? (entry.staffName||'—') : '—',
         status,
       ];
@@ -1748,13 +1798,13 @@ async function exportDailyPDF(){
 
     doc.autoTable({
       startY: 38,
-      head: [['Item','Unit','Yesterday','Today','Change','Staff','Status']],
+      head: [['Item','Unit', getPreviousLabel(), formatShort(state.date), 'Stock In','Usage','Staff','Status']],
       body: rows,
       styles:{ fontSize:8, cellPadding:2 },
       headStyles:{ fillColor:[38,44,32], textColor:255, fontStyle:'bold' },
       alternateRowStyles:{ fillColor:[245,245,242] },
       didParseCell: (data)=>{
-        if(data.section==='body' && data.column.index===6){
+        if(data.section==='body' && data.column.index===7){
           const val = data.cell.raw;
           if(val==='Low Stock'){ data.cell.styles.textColor=[163,51,82]; data.cell.styles.fontStyle='bold'; }
           else if(val==='OK'){ data.cell.styles.textColor=[110,140,60]; data.cell.styles.fontStyle='bold'; }
